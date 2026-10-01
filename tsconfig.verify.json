@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./node_modules/.tmp/verify",
+    "rootDir": "./src",
+    "types": ["node"]
+  },
+  "include": ["src/models/**/*.ts", "src/services/**/*.ts", "src/stores/**/*.ts"]
+}

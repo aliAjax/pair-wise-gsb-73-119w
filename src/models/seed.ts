@@ -1,8 +1,13 @@
 import type {
+  ArchitectureComponent,
   AuditEvent,
   ControlEvidence,
+  DataFlow,
   MitigationTask,
+  Retirable,
   ReviewDecision,
+  SecurityControl,
+  Threat,
   ThreatModelState,
   VersionSnapshot,
 } from './domain'
@@ -197,6 +202,9 @@ const audit: AuditEvent[] = [
   },
 ]
 
+const activate = <T extends Retirable>(entities: T[]): T[] =>
+  entities.map((entity) => ({ ...entity, lifecycle: 'active' as const }))
+
 export const createSeedState = (): ThreatModelState => ({
   boundary: {
     id: 'boundary-01',
@@ -212,7 +220,7 @@ export const createSeedState = (): ThreatModelState => ({
     { id: 'zone-03', name: '核心业务区', level: 'internal', description: '运营服务、规则引擎和工作流。' },
     { id: 'zone-04', name: '受限数据区', level: 'restricted', description: '客户敏感数据与审计记录。' },
   ],
-  components: [
+  components: activate<ArchitectureComponent>([
     {
       id: 'cmp-01',
       name: '运营管理门户',
@@ -267,7 +275,7 @@ export const createSeedState = (): ThreatModelState => ({
       owner: '生态集成组',
       description: '与合作机构交换活动结果与归因数据。',
     },
-  ],
+  ]),
   dependencies: [
     {
       id: 'dep-01',
@@ -297,7 +305,7 @@ export const createSeedState = (): ThreatModelState => ({
       status: 'active',
     },
   ],
-  flows: [
+  flows: activate<DataFlow>([
     {
       id: 'flow-01',
       name: '运营人员访问管理门户',
@@ -348,8 +356,8 @@ export const createSeedState = (): ThreatModelState => ({
       crossesTrustBoundary: true,
       description: '同步伙伴活动归因，使用独立签名密钥。',
     },
-  ],
-  controls: [
+  ]),
+  controls: activate<SecurityControl>([
     {
       id: 'ctl-01',
       name: '统一身份与细粒度授权',
@@ -390,9 +398,9 @@ export const createSeedState = (): ThreatModelState => ({
       description: '高敏归档任务需申请人与复核人共同确认。',
       evidenceIds: ['ev-04'],
     },
-  ],
-  evidence,
-  threats: [
+  ]),
+  evidence: activate<ControlEvidence>(evidence),
+  threats: activate<Threat>([
     {
       id: 'thr-01',
       code: 'TM-001',
@@ -444,7 +452,7 @@ export const createSeedState = (): ThreatModelState => ({
       reviewStatus: 'in_review',
       revision: 2,
     },
-  ],
+  ]),
   attackPaths: [
     {
       id: 'path-01',
@@ -511,9 +519,11 @@ export const createSeedState = (): ThreatModelState => ({
       owner: '生态集成组',
     },
   ],
-  mitigations,
+  mitigations: activate<MitigationTask>(mitigations),
   decisions,
   versions: baselineVersions,
   audit,
   currentRevision: 2,
+  meta: { schemaVersion: 2, mutationCounter: 0 },
+  cleanupJobs: [],
 })

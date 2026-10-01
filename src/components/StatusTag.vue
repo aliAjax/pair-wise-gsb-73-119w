@@ -29,6 +29,9 @@ const labels: Record<string, string> = {
   in_progress: '进行中',
   verifying: '验证中',
   done: '已完成',
+  retired: '已停用',
+  active: '活跃',
+  review_due: '待复核',
 }
 
 const palette = computed(() => {
@@ -49,6 +52,9 @@ const palette = computed(() => {
     mitigated: 'success',
     closed: 'success',
     done: 'success',
+    active: 'success',
+    review_due: 'warn',
+    retired: 'secondary',
   }
   return severity[props.value] ?? 'secondary'
 })

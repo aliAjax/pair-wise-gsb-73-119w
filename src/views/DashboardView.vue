@@ -9,13 +9,15 @@ import ProgressBar from 'primevue/progressbar'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useDashboardGraphql } from '@/composables/useDashboardGraphql'
-import { riskLevel, riskScore } from '@/services/selectors'
+import { activeFlows, riskLevel, riskScore } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
 const { metrics, loading, error, load } = useDashboardGraphql()
 
 onMounted(load)
+
+const activeFlowCount = computed(() => activeFlows(store.data).length)
 
 const topRisks = computed(() =>
   [...store.data.risks]
@@ -42,7 +44,7 @@ const componentName = (id: string): string =>
       <div class="metric">
         <div class="metric-label">建模组件</div>
         <div class="metric-value">{{ metrics?.components ?? store.metrics.components }}</div>
-        <div class="metric-note">{{ store.data.flows.length }} 条数据流已登记</div>
+        <div class="metric-note">{{ activeFlowCount }} 条数据流已登记</div>
       </div>
       <div class="metric">
         <div class="metric-label">开放严重威胁</div>

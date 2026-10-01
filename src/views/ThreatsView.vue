@@ -13,6 +13,13 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { Threat } from '@/models/domain'
 import { createId } from '@/services/repository'
+import {
+  activeComponents,
+  activeControls,
+  activeDependencies,
+  activeFlows,
+  activeThreats,
+} from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -72,7 +79,7 @@ const threatForm = reactive<Threat>({
 
 const filteredThreats = computed(() => {
   const normalized = keyword.value.trim().toLowerCase()
-  return store.data.threats.filter((threat) => {
+  return activeThreats(store.data).filter((threat) => {
     const textMatches =
       !normalized ||
       threat.title.toLowerCase().includes(normalized) ||
@@ -86,6 +93,12 @@ const filteredThreats = computed(() => {
     )
   })
 })
+
+// 编辑器只允许关联活跃对象；停用对象保留在历史记录中，不可新增引用
+const componentOptions = computed(() => activeComponents(store.data))
+const flowOptions = computed(() => activeFlows(store.data))
+const dependencyOptions = computed(() => activeDependencies(store.data))
+const controlOptions = computed(() => activeControls(store.data))
 
 const selectedThreat = computed(
   () => store.data.threats.find((threat) => threat.id === selectedId.value) ?? null,
@@ -164,10 +177,22 @@ const saveThreat = (): void => {
   const saved: Threat = {
     ...threatForm,
     id: threatForm.id || createId('thr'),
+    lifecycle: threatForm.lifecycle ?? 'active',
     revision: threatForm.id ? store.data.currentRevision + 1 : store.data.currentRevision,
     reviewStatus: threatForm.id ? 'in_review' : threatForm.reviewStatus,
   }
-  store.saveThreat(saved)
+  const result = store.saveThreat(saved)
+  if (result.conflict) {
+    // 另一窗口已先提交（可能重建了同一编号）：状态已刷新，按最新引用重试
+    editorVisible.value = false
+    toast.add({
+      severity: 'warn',
+      summary: '引用关系已变化',
+      detail: '其他窗口已先更新模型，威胁清单已刷新，请确认编号后重新保存。',
+      life: 4500,
+    })
+    return
+  }
   selectedId.value = saved.id
   editorVisible.value = false
   toast.add({
@@ -374,7 +399,7 @@ const saveThreat = (): void => {
           <label>关联组件</label>
           <MultiSelect
             v-model="threatForm.componentIds"
-            :options="store.data.components"
+            :options="componentOptions"
             option-label="name"
             option-value="id"
             display="chip"
@@ -385,7 +410,7 @@ const saveThreat = (): void => {
           <label>关联数据流</label>
           <MultiSelect
             v-model="threatForm.flowIds"
-            :options="store.data.flows"
+            :options="flowOptions"
             option-label="name"
             option-value="id"
             display="chip"
@@ -396,7 +421,7 @@ const saveThreat = (): void => {
           <label>外部依赖</label>
           <MultiSelect
             v-model="threatForm.externalDependencyIds"
-            :options="store.data.dependencies"
+            :options="dependencyOptions"
             option-label="name"
             option-value="id"
             display="chip"
@@ -416,7 +441,7 @@ const saveThreat = (): void => {
           <label>现有控制</label>
           <MultiSelect
             v-model="threatForm.controlIds"
-            :options="store.data.controls"
+            :options="controlOptions"
             option-label="name"
             option-value="id"
             display="chip"

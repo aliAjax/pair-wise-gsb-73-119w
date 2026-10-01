@@ -1,12 +1,42 @@
 <script setup lang="ts">
+import { watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
+import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const router = useRouter()
 const confirm = useConfirm()
+const toast = useToast()
 const store = useThreatModelStore()
+
+// 其他窗口提交（移除/重建）后，本窗口状态已刷新，明确提示引用关系变化
+watch(
+  () => store.externalSyncCount,
+  (count) => {
+    if (count === 0) return
+    toast.add({
+      severity: 'info',
+      summary: '引用关系已变化',
+      detail: '模型在其他窗口被更新，页面已刷新为最新结果。',
+      life: 4000,
+    })
+  },
+)
+
+watch(
+  () => store.conflictCount,
+  (count) => {
+    if (count === 0) return
+    toast.add({
+      severity: 'warn',
+      summary: '提交未生效',
+      detail: '其他窗口已先更新模型，本地修改已放弃并刷新，请确认后重试。',
+      life: 4500,
+    })
+  },
+)
 
 const navigation = [
   { label: '工作台', icon: 'pi pi-chart-line', to: '/' },

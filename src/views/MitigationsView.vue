@@ -13,6 +13,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { MitigationTask } from '@/models/domain'
 import { createId } from '@/services/repository'
+import { activeEvidence, activeMitigations, activeThreats } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -49,9 +50,12 @@ const form = reactive<MitigationTask>({
 
 const filteredTasks = computed(() =>
   statusFilter.value
-    ? store.data.mitigations.filter((task) => task.status === statusFilter.value)
-    : store.data.mitigations,
+    ? activeMitigations(store.data).filter((task) => task.status === statusFilter.value)
+    : activeMitigations(store.data),
 )
+
+const threatOptions = computed(() => activeThreats(store.data))
+const evidenceOptions = computed(() => activeEvidence(store.data))
 
 const conflictTaskIds = computed(() => {
   const conflicts = store.issues.filter((issue) => issue.kind === 'mitigation_conflict')
@@ -75,7 +79,7 @@ const openEditor = (task?: MitigationTask): void => {
       ? structuredClone(task)
       : {
           id: '',
-          threatId: store.data.threats[0]?.id ?? '',
+          threatId: threatOptions.value[0]?.id ?? '',
           title: '',
           owner: '',
           dueAt: '',
@@ -193,7 +197,7 @@ const nextStatus = (status: MitigationTask['status']): MitigationTask['status'] 
           <label>关联威胁</label>
           <Select
             v-model="form.threatId"
-            :options="store.data.threats"
+            :options="threatOptions"
             option-label="title"
             option-value="id"
             filter
@@ -240,7 +244,7 @@ const nextStatus = (status: MitigationTask['status']): MitigationTask['status'] 
           <label>关联证据</label>
           <MultiSelect
             v-model="form.evidenceIds"
-            :options="store.data.evidence"
+            :options="evidenceOptions"
             option-label="title"
             option-value="id"
             display="chip"

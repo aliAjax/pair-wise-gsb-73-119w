@@ -5,6 +5,18 @@ export type ControlStatus = 'effective' | 'degraded' | 'failed' | 'planned'
 export type ActorRole = 'development' | 'security' | 'business'
 export type DecisionType = 'accept' | 'degrade' | 'evidence_required' | 'approved' | 'rejected'
 
+/**
+ * 生命周期：active 参与图谱、指标与报告；retired 已停用，仅保留历史。
+ * 旧数据迁移前该字段可能缺失，读取侧一律用 isRetired 判断。
+ */
+export type LifecycleStatus = 'active' | 'retired'
+
+export interface Retirable {
+  lifecycle?: LifecycleStatus
+  retiredAt?: string
+  retireReason?: string
+}
+
 export interface SystemBoundary {
   id: string
   name: string
@@ -21,7 +33,7 @@ export interface TrustZone {
   description: string
 }
 
-export interface ArchitectureComponent {
+export interface ArchitectureComponent extends Retirable {
   id: string
   name: string
   type: 'service' | 'asset' | 'data_store' | 'gateway' | 'client'
@@ -41,7 +53,7 @@ export interface ExternalDependency {
   status: 'active' | 'review_due' | 'retired'
 }
 
-export interface DataFlow {
+export interface DataFlow extends Retirable {
   id: string
   name: string
   sourceId: string
@@ -52,7 +64,7 @@ export interface DataFlow {
   description: string
 }
 
-export interface ControlEvidence {
+export interface ControlEvidence extends Retirable {
   id: string
   controlId: string
   title: string
@@ -64,7 +76,7 @@ export interface ControlEvidence {
   valid: boolean
 }
 
-export interface SecurityControl {
+export interface SecurityControl extends Retirable {
   id: string
   name: string
   type: 'preventive' | 'detective' | 'corrective'
@@ -96,7 +108,7 @@ export interface Risk {
   acceptanceCondition?: string
 }
 
-export interface Threat {
+export interface Threat extends Retirable {
   id: string
   code: string
   title: string
@@ -114,7 +126,7 @@ export interface Threat {
   revision: number
 }
 
-export interface MitigationTask {
+export interface MitigationTask extends Retirable {
   id: string
   threatId: string
   title: string
@@ -163,6 +175,49 @@ export interface AuditEvent {
   detail: string
 }
 
+/** 持久化元信息：schemaVersion 驱动首启迁移，mutationCounter 用于跨窗口并发检测。 */
+export interface StateMeta {
+  schemaVersion: number
+  mutationCounter: number
+}
+
+export type CleanupEntityCollection =
+  | 'components'
+  | 'flows'
+  | 'dependencies'
+  | 'controls'
+  | 'evidence'
+  | 'threats'
+  | 'mitigations'
+
+export type CleanupItemKind =
+  | 'strip_reference' // 从某实体的引用数组中移除目标编号
+  | 'delete_entity' // 仅被草稿引用的对象：物理删除
+  | 'retire_entity' // 被版本冻结或会签使用的对象：转停用保留历史
+  | 'reopen_review' // 相关会签回到待重审（威胁修订号 +1）
+
+export interface CleanupJobItem {
+  id: string
+  kind: CleanupItemKind
+  collection: CleanupEntityCollection
+  entityId: string
+  /** strip_reference 时为承载引用的字段名；retire_entity 时为停用原因 */
+  field?: string
+  targetId?: string
+  note?: string
+  status: 'pending' | 'done' | 'failed'
+  error?: string
+}
+
+/** 一次移除/级联清理即一个批量任务；逐项落库，中断后可按 pending 项恢复。 */
+export interface CleanupJob {
+  id: string
+  label: string
+  createdAt: string
+  status: 'running' | 'done' | 'failed'
+  items: CleanupJobItem[]
+}
+
 export interface ThreatModelState {
   boundary: SystemBoundary
   zones: TrustZone[]
@@ -179,6 +234,8 @@ export interface ThreatModelState {
   versions: VersionSnapshot[]
   audit: AuditEvent[]
   currentRevision: number
+  meta: StateMeta
+  cleanupJobs: CleanupJob[]
 }
 
 export interface ValidationIssue {

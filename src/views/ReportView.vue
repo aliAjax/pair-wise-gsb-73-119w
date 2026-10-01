@@ -5,7 +5,7 @@ import Checkbox from 'primevue/checkbox'
 import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { riskLevel, riskScore } from '@/services/selectors'
+import { activeEvidence, riskLevel, riskScore } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -20,7 +20,7 @@ const report = computed(() => {
     '',
     '## 控制证据',
     ...(includeEvidence.value
-      ? store.data.evidence.map(
+      ? activeEvidence(store.data).map(
           (evidence) =>
             `- ${evidence.title}（${evidence.reference}，${evidence.collectedAt} 至 ${evidence.expiresAt}）`,
         )

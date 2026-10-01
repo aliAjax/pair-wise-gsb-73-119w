@@ -10,7 +10,7 @@ import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { ActorRole, DecisionType, Threat } from '@/models/domain'
-import { decisionsForThreat, reviewProgress } from '@/services/selectors'
+import { activeThreats, decisionsForThreat, reviewProgress } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -45,8 +45,9 @@ const form = reactive<{
 
 const latestVersion = computed(() => store.data.versions[0])
 const affectedThreats = computed(() => {
-  const ids = latestVersion.value?.affectedThreatIds ?? store.data.threats.map((threat) => threat.id)
-  return store.data.threats.filter((threat) => ids.includes(threat.id))
+  const ids =
+    latestVersion.value?.affectedThreatIds ?? activeThreats(store.data).map((threat) => threat.id)
+  return activeThreats(store.data).filter((threat) => ids.includes(threat.id))
 })
 const selectedThreat = computed(
   () => store.data.threats.find((threat) => threat.id === selectedThreatId.value) ?? null,
@@ -85,7 +86,7 @@ const submitDecision = (): void => {
     toast.add({ severity: 'error', summary: '校验失败', detail: '会签意见不能为空', life: 3000 })
     return
   }
-  store.submitDecision(
+  const result = store.submitDecision(
     selectedThreat.value.id,
     form.role,
     form.decision,
@@ -93,6 +94,15 @@ const submitDecision = (): void => {
     form.comment,
   )
   decisionVisible.value = false
+  if (result.conflict) {
+    toast.add({
+      severity: 'warn',
+      summary: '引用关系已变化',
+      detail: '其他窗口已先更新模型，会签意见未提交，请确认后重试。',
+      life: 4500,
+    })
+    return
+  }
   toast.add({ severity: 'success', summary: '会签意见已提交', detail: '审核状态已重新计算', life: 2500 })
 }
 

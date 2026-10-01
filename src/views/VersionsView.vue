@@ -10,7 +10,7 @@ import Textarea from 'primevue/textarea'
 import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import type { VersionChange, VersionSnapshot } from '@/models/domain'
-import { compareSnapshots } from '@/services/selectors'
+import { activeThreats, compareSnapshots, isRetired } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -36,26 +36,31 @@ const difference = computed(() =>
     : { added: [], removed: [], changed: [] },
 )
 
+// 版本快照是冻结历史：已停用对象保留名称并标注，已删除对象明确标注，不再留下裸编号
 const entityName = (change: VersionChange): string => {
+  const annotate = (name: string, retired: boolean): string =>
+    retired ? `${name}（已停用）` : name
   if (change.category === '组件') {
     const item = store.data.components.find((entry) => entry.id === change.id)
-    return item ? `${item.name} (${item.id})` : change.id
+    return item ? `${annotate(item.name, isRetired(item))} (${item.id})` : `${change.id}（已删除）`
   }
   if (change.category === '数据流') {
     const item = store.data.flows.find((entry) => entry.id === change.id)
-    return item ? `${item.name} (${item.id})` : change.id
+    return item ? `${annotate(item.name, isRetired(item))} (${item.id})` : `${change.id}（已删除）`
   }
   if (change.category === '威胁') {
     const item = store.data.threats.find((entry) => entry.id === change.id)
-    return item ? `${item.code} ${item.title} (${item.id})` : change.id
+    return item
+      ? `${annotate(`${item.code} ${item.title}`, isRetired(item))} (${item.id})`
+      : `${change.id}（已删除）`
   }
   if (change.category === '控制') {
     const item = store.data.controls.find((entry) => entry.id === change.id)
-    return item ? `${item.name} (${item.id})` : change.id
+    return item ? `${annotate(item.name, isRetired(item))} (${item.id})` : `${change.id}（已删除）`
   }
   if (change.category === '风险') {
     const item = store.data.risks.find((entry) => entry.id === change.id)
-    return item ? `${item.code} ${item.title} (${item.id})` : change.id
+    return item ? `${item.code} ${item.title} (${item.id})` : `${change.id}（已删除）`
   }
   return change.id
 }
@@ -81,6 +86,16 @@ const createVersion = (): void => {
     createForm.notes,
     createForm.affectedThreatIds,
   )
+  if (!snapshot) {
+    createVisible.value = false
+    toast.add({
+      severity: 'warn',
+      summary: '引用关系已变化',
+      detail: '其他窗口已先更新模型，版本未创建，请确认后重试。',
+      life: 4500,
+    })
+    return
+  }
   fromVersionId.value = toVersionId.value
   toVersionId.value = snapshot.id
   createVisible.value = false
@@ -219,7 +234,7 @@ const approvalLabel = (snapshot: VersionSnapshot): string =>
           <label>受影响威胁</label>
           <MultiSelect
             v-model="createForm.affectedThreatIds"
-            :options="store.data.threats"
+            :options="activeThreats(store.data)"
             option-label="title"
             option-value="id"
             display="chip"

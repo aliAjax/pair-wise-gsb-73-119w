@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { activeComponents, activeFlows } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
 
 const nodeWidth = 174
 const nodeHeight = 66
+
+// 图谱只渲染活跃实体；停用对象保留在历史与版本中，不在图上出现
+const diagramComponents = computed(() => activeComponents(store.data))
+const diagramFlows = computed(() => activeFlows(store.data))
+
 const columns = computed(() => {
-  const grouped = new Map<string, typeof store.data.components>()
+  const grouped = new Map<string, typeof diagramComponents.value>()
   store.data.zones.forEach((zone) => grouped.set(zone.id, []))
-  store.data.components.forEach((component) => {
+  diagramComponents.value.forEach((component) => {
     const group = grouped.get(component.zoneId) ?? []
     group.push(component)
     grouped.set(component.zoneId, group)
@@ -36,7 +42,7 @@ const diagramHeight = computed(() => {
 })
 
 const componentName = (id: string): string =>
-  store.data.components.find((component) => component.id === id)?.name ?? id
+  diagramComponents.value.find((component) => component.id === id)?.name ?? id
 </script>
 
 <template>
@@ -103,7 +109,7 @@ const componentName = (id: string): string =>
           </text>
         </g>
       </g>
-      <g v-for="flow in store.data.flows" :key="flow.id">
+      <g v-for="flow in diagramFlows" :key="flow.id">
         <line
           v-if="nodePositions[flow.sourceId] && nodePositions[flow.targetId]"
           :x1="nodePositions[flow.sourceId].x + nodeWidth"
@@ -172,7 +178,7 @@ const componentName = (id: string): string =>
       <span>虚线：信任区边界</span>
     </div>
     <div class="flow-index">
-      <div v-for="flow in store.data.flows" :key="flow.id" class="flow-index-item">
+      <div v-for="flow in diagramFlows" :key="flow.id" class="flow-index-item">
         <strong>{{ flow.name }}</strong>
         <span>{{ componentName(flow.sourceId) }} → {{ componentName(flow.targetId) }}</span>
       </div>
