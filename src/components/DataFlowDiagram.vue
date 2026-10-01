@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useThreatModelStore } from '@/stores/threatModel'
+import { activeComponents, activeFlows } from '@/services/selectors'
 
 const store = useThreatModelStore()
 
 const nodeWidth = 174
 const nodeHeight = 66
+const components = computed(() => activeComponents(store.data))
+const flows = computed(() => activeFlows(store.data))
 const columns = computed(() => {
-  const grouped = new Map<string, typeof store.data.components>()
+  const grouped = new Map<string, typeof components.value>()
   store.data.zones.forEach((zone) => grouped.set(zone.id, []))
-  store.data.components.forEach((component) => {
+  components.value.forEach((component) => {
     const group = grouped.get(component.zoneId) ?? []
     group.push(component)
     grouped.set(component.zoneId, group)
@@ -19,8 +22,8 @@ const columns = computed(() => {
 
 const nodePositions = computed<Record<string, { x: number; y: number }>>(() => {
   const result: Record<string, { x: number; y: number }> = {}
-  columns.value.forEach(([, components], columnIndex) => {
-    components.forEach((component, rowIndex) => {
+  columns.value.forEach(([, zoneComponents], columnIndex) => {
+    zoneComponents.forEach((component, rowIndex) => {
       result[component.id] = {
         x: 36 + columnIndex * 236,
         y: 74 + rowIndex * 104,
@@ -31,12 +34,12 @@ const nodePositions = computed<Record<string, { x: number; y: number }>>(() => {
 })
 
 const diagramHeight = computed(() => {
-  const maxRows = Math.max(...columns.value.map(([, components]) => components.length), 1)
+  const maxRows = Math.max(...columns.value.map(([, zoneComponents]) => zoneComponents.length), 1)
   return Math.max(480, maxRows * 104 + 150)
 })
 
 const componentName = (id: string): string =>
-  store.data.components.find((component) => component.id === id)?.name ?? id
+  components.value.find((component) => component.id === id)?.name ?? id
 </script>
 
 <template>
@@ -103,7 +106,7 @@ const componentName = (id: string): string =>
           </text>
         </g>
       </g>
-      <g v-for="flow in store.data.flows" :key="flow.id">
+      <g v-for="flow in flows" :key="flow.id">
         <line
           v-if="nodePositions[flow.sourceId] && nodePositions[flow.targetId]"
           :x1="nodePositions[flow.sourceId].x + nodeWidth"
@@ -172,7 +175,7 @@ const componentName = (id: string): string =>
       <span>虚线：信任区边界</span>
     </div>
     <div class="flow-index">
-      <div v-for="flow in store.data.flows" :key="flow.id" class="flow-index-item">
+      <div v-for="flow in flows" :key="flow.id" class="flow-index-item">
         <strong>{{ flow.name }}</strong>
         <span>{{ componentName(flow.sourceId) }} → {{ componentName(flow.targetId) }}</span>
       </div>

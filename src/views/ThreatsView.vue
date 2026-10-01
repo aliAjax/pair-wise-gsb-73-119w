@@ -13,6 +13,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { Threat } from '@/models/domain'
 import { createId } from '@/services/repository'
+import { activeComponents, activeControls, activeDependencies, activeFlows, activeRisks, isActive } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -73,6 +74,7 @@ const threatForm = reactive<Threat>({
 const filteredThreats = computed(() => {
   const normalized = keyword.value.trim().toLowerCase()
   return store.data.threats.filter((threat) => {
+    if (!isActive(threat.lifecycle)) return false
     const textMatches =
       !normalized ||
       threat.title.toLowerCase().includes(normalized) ||
@@ -374,7 +376,7 @@ const saveThreat = (): void => {
           <label>关联组件</label>
           <MultiSelect
             v-model="threatForm.componentIds"
-            :options="store.data.components"
+            :options="activeComponents(store.data)"
             option-label="name"
             option-value="id"
             display="chip"
@@ -385,7 +387,7 @@ const saveThreat = (): void => {
           <label>关联数据流</label>
           <MultiSelect
             v-model="threatForm.flowIds"
-            :options="store.data.flows"
+            :options="activeFlows(store.data)"
             option-label="name"
             option-value="id"
             display="chip"
@@ -396,7 +398,7 @@ const saveThreat = (): void => {
           <label>外部依赖</label>
           <MultiSelect
             v-model="threatForm.externalDependencyIds"
-            :options="store.data.dependencies"
+            :options="activeDependencies(store.data)"
             option-label="name"
             option-value="id"
             display="chip"
@@ -416,7 +418,7 @@ const saveThreat = (): void => {
           <label>现有控制</label>
           <MultiSelect
             v-model="threatForm.controlIds"
-            :options="store.data.controls"
+            :options="activeControls(store.data)"
             option-label="name"
             option-value="id"
             display="chip"
@@ -426,7 +428,7 @@ const saveThreat = (): void => {
           <label>关联风险</label>
           <MultiSelect
             v-model="threatForm.riskIds"
-            :options="store.data.risks"
+            :options="activeRisks(store.data)"
             option-label="title"
             option-value="id"
             display="chip"

@@ -10,7 +10,7 @@ import Textarea from 'primevue/textarea'
 import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import type { VersionChange, VersionSnapshot } from '@/models/domain'
-import { compareSnapshots } from '@/services/selectors'
+import { activeThreats, compareSnapshots } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -219,7 +219,7 @@ const approvalLabel = (snapshot: VersionSnapshot): string =>
           <label>受影响威胁</label>
           <MultiSelect
             v-model="createForm.affectedThreatIds"
-            :options="store.data.threats"
+            :options="activeThreats(store.data)"
             option-label="title"
             option-value="id"
             display="chip"

@@ -10,7 +10,7 @@ import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { ActorRole, DecisionType, Threat } from '@/models/domain'
-import { decisionsForThreat, reviewProgress } from '@/services/selectors'
+import { decisionsForThreat, isActive, reviewProgress } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -46,7 +46,7 @@ const form = reactive<{
 const latestVersion = computed(() => store.data.versions[0])
 const affectedThreats = computed(() => {
   const ids = latestVersion.value?.affectedThreatIds ?? store.data.threats.map((threat) => threat.id)
-  return store.data.threats.filter((threat) => ids.includes(threat.id))
+  return store.data.threats.filter((threat) => ids.includes(threat.id) && isActive(threat.lifecycle))
 })
 const selectedThreat = computed(
   () => store.data.threats.find((threat) => threat.id === selectedThreatId.value) ?? null,

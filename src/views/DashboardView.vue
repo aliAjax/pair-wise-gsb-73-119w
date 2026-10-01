@@ -9,7 +9,7 @@ import ProgressBar from 'primevue/progressbar'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import { useDashboardGraphql } from '@/composables/useDashboardGraphql'
-import { riskLevel, riskScore } from '@/services/selectors'
+import { isActive, riskLevel, riskScore } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -19,7 +19,7 @@ onMounted(load)
 
 const topRisks = computed(() =>
   [...store.data.risks]
-    .filter((risk) => risk.status !== 'closed')
+    .filter((risk) => isActive(risk.lifecycle) && risk.status !== 'closed')
     .sort((a, b) => riskScore(b) - riskScore(a))
     .slice(0, 5),
 )
@@ -42,7 +42,9 @@ const componentName = (id: string): string =>
       <div class="metric">
         <div class="metric-label">建模组件</div>
         <div class="metric-value">{{ metrics?.components ?? store.metrics.components }}</div>
-        <div class="metric-note">{{ store.data.flows.length }} 条数据流已登记</div>
+        <div class="metric-note">
+          {{ store.data.flows.filter((flow) => isActive(flow.lifecycle)).length }} 条活动数据流已登记
+        </div>
       </div>
       <div class="metric">
         <div class="metric-label">开放严重威胁</div>

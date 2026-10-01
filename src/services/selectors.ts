@@ -1,5 +1,6 @@
 import type {
   ControlEvidence,
+  LifecycleMeta,
   ReviewDecision,
   Risk,
   Severity,
@@ -9,8 +10,28 @@ import type {
   VersionDifference,
   VersionSnapshot,
 } from '@/models/domain'
+import { isInactive } from '@/services/lifecycle'
 
 const TODAY = new Date('2026-09-29T00:00:00+08:00')
+
+export const isActive = (lifecycle?: LifecycleMeta): boolean => !isInactive(lifecycle)
+
+export const activeComponents = (state: ThreatModelState) =>
+  state.components.filter((item) => isActive(item.lifecycle))
+export const activeFlows = (state: ThreatModelState) =>
+  state.flows.filter((item) => isActive(item.lifecycle))
+export const activeDependencies = (state: ThreatModelState) =>
+  state.dependencies.filter((item) => isActive(item.lifecycle))
+export const activeControls = (state: ThreatModelState) =>
+  state.controls.filter((item) => isActive(item.lifecycle))
+export const activeEvidence = (state: ThreatModelState) =>
+  state.evidence.filter((item) => isActive(item.lifecycle))
+export const activeThreats = (state: ThreatModelState) =>
+  state.threats.filter((item) => isActive(item.lifecycle))
+export const activeRisks = (state: ThreatModelState) =>
+  state.risks.filter((item) => isActive(item.lifecycle))
+export const activeMitigations = (state: ThreatModelState) =>
+  state.mitigations.filter((item) => isActive(item.lifecycle))
 
 export const riskScore = (risk: Risk): number => risk.likelihood * risk.impact
 
@@ -28,10 +49,18 @@ export const evidenceIsExpired = (evidence: ControlEvidence): boolean => isExpir
 
 export const getValidationIssues = (state: ThreatModelState): ValidationIssue[] => {
   const issues: ValidationIssue[] = []
-  const coveredComponentIds = new Set(state.threats.flatMap((threat) => threat.componentIds))
-  const coveredFlowIds = new Set(state.threats.flatMap((threat) => threat.flowIds))
+  const components = activeComponents(state)
+  const flows = activeFlows(state)
+  const controls = activeControls(state)
+  const evidence = activeEvidence(state)
+  const risks = activeRisks(state)
+  const mitigations = activeMitigations(state)
+  const threats = activeThreats(state)
 
-  state.components
+  const coveredComponentIds = new Set(threats.flatMap((threat) => threat.componentIds))
+  const coveredFlowIds = new Set(threats.flatMap((threat) => threat.flowIds))
+
+  components
     .filter((component) => !coveredComponentIds.has(component.id))
     .forEach((component) => {
       issues.push({
@@ -44,7 +73,7 @@ export const getValidationIssues = (state: ThreatModelState): ValidationIssue[] 
       })
     })
 
-  state.flows
+  flows
     .filter((flow) => !coveredFlowIds.has(flow.id))
     .forEach((flow) => {
       issues.push({
@@ -57,7 +86,7 @@ export const getValidationIssues = (state: ThreatModelState): ValidationIssue[] 
       })
     })
 
-  state.controls
+  controls
     .filter((control) => control.status === 'failed' || control.status === 'degraded')
     .forEach((control) => {
       issues.push({
@@ -70,14 +99,14 @@ export const getValidationIssues = (state: ThreatModelState): ValidationIssue[] 
       })
     })
 
-  state.controls
+  controls
     .filter((control) => {
       if (control.evidenceIds.length === 0) return true
-      const validEvidence = control.evidenceIds
-        .map((id) => state.evidence.find((item) => item.id === id))
+      const validEvidenceRecords = control.evidenceIds
+        .map((id) => evidence.find((item) => item.id === id))
         .filter((item): item is ControlEvidence => Boolean(item))
         .filter((item) => item.valid && !evidenceIsExpired(item))
-      return validEvidence.length === 0
+      return validEvidenceRecords.length === 0
     })
     .forEach((control) => {
       issues.push({
@@ -90,7 +119,7 @@ export const getValidationIssues = (state: ThreatModelState): ValidationIssue[] 
       })
     })
 
-  state.risks
+  risks
     .filter((risk) => risk.status === 'accepted' && isExpired(risk.acceptanceExpiresAt))
     .forEach((risk) => {
       issues.push({
@@ -103,8 +132,58 @@ export const getValidationIssues = (state: ThreatModelState): ValidationIssue[] 
       })
     })
 
-  const taskGroups = new Map<string, typeof state.mitigations>()
-  state.mitigations.forEach((task) => {
+  // 悬空引用：活动威胁引用了缺失或已停用的对象
+  const staleKinds: { key: string; label: string; ids: Set<string> }[] = [
+    { key: 'componentIds', label: '组件', ids: new Set(state.components.map((item) => item.id)) },
+    { key: 'flowIds', label: '数据流', ids: new Set(state.flows.map((item) => item.id)) },
+    { key: 'externalDependencyIds', label: '外部依赖', ids: new Set(state.dependencies.map((item) => item.id)) },
+    { key: 'controlIds', label: '控制', ids: new Set(state.controls.map((item) => item.id)) },
+    { key: 'attackPathIds', label: '攻击路径', ids: new Set(state.attackPaths.map((item) => item.id)) },
+    { key: 'riskIds', label: '风险', ids: new Set(state.risks.map((item) => item.id)) },
+  ]
+  const inactiveIdSet = (collection: { id: string; lifecycle?: LifecycleMeta }[]) =>
+    new Set(collection.filter((item) => !isActive(item.lifecycle)).map((item) => item.id))
+  const inactivePools = {
+    componentIds: inactiveIdSet(state.components),
+    flowIds: inactiveIdSet(state.flows),
+    externalDependencyIds: inactiveIdSet(state.dependencies),
+    controlIds: inactiveIdSet(state.controls),
+    attackPathIds: inactiveIdSet(state.attackPaths),
+    riskIds: inactiveIdSet(state.risks),
+  }
+
+  threats.forEach((threat) => {
+    staleKinds.forEach(({ key, label, ids }) => {
+      const refs = (threat as unknown as Record<string, string[]>)[key] ?? []
+      const missing = refs.filter((id) => !ids.has(id))
+      const stopped = refs.filter((id) =>
+        (inactivePools as Record<string, Set<string>>)[key]?.has(id),
+      )
+      if (missing.length > 0) {
+        issues.push({
+          id: `stale-${threat.id}-${key}-missing`,
+          kind: 'stale_reference',
+          severity: 'high',
+          title: `${threat.code} 存在缺失的${label}引用`,
+          detail: `编号 ${missing.join('、')} 在模型中已不存在，请重新关联或剪除草稿引用。`,
+          entityId: threat.id,
+        })
+      }
+      if (stopped.length > 0) {
+        issues.push({
+          id: `stale-${threat.id}-${key}-inactive`,
+          kind: 'stale_reference',
+          severity: 'medium',
+          title: `${threat.code} 引用了已停用的${label}`,
+          detail: `编号 ${stopped.join('、')} 已停用留档，威胁需要重新评估或改挂新对象。`,
+          entityId: threat.id,
+        })
+      }
+    })
+  })
+
+  const taskGroups = new Map<string, typeof mitigations>()
+  mitigations.forEach((task) => {
     if (!task.conflictGroup) return
     const key = `${task.threatId}:${task.conflictGroup}`
     const group = taskGroups.get(key) ?? []
@@ -193,13 +272,18 @@ export const compareSnapshots = (from: VersionSnapshot, to: VersionSnapshot): Ve
 }
 
 export const threatCoverage = (state: ThreatModelState): number => {
-  if (state.components.length === 0) return 100
-  const covered = new Set(state.threats.flatMap((threat) => threat.componentIds))
-  return Math.round((covered.size / state.components.length) * 100)
+  const components = activeComponents(state)
+  if (components.length === 0) return 100
+  const covered = new Set(
+    activeThreats(state).flatMap((threat) => threat.componentIds),
+  )
+  return Math.round((covered.size / components.length) * 100)
 }
 
 export const openCriticalThreats = (threats: Threat[]): number =>
-  threats.filter((threat) => threat.severity === 'critical' && threat.status !== 'mitigated').length
+  threats
+    .filter((threat) => isActive(threat.lifecycle))
+    .filter((threat) => threat.severity === 'critical' && threat.status !== 'mitigated').length
 
 export interface DashboardMetrics {
   components: number
@@ -210,11 +294,14 @@ export interface DashboardMetrics {
   pendingReviews: number
 }
 
-export const dashboardMetrics = (state: ThreatModelState): DashboardMetrics => ({
-  components: state.components.length,
-  threats: state.threats.length,
-  critical: openCriticalThreats(state.threats),
-  coverage: threatCoverage(state),
-  openIssues: getValidationIssues(state).length,
-  pendingReviews: state.threats.filter((threat) => threat.reviewStatus === 'in_review').length,
-})
+export const dashboardMetrics = (state: ThreatModelState): DashboardMetrics => {
+  const threats = activeThreats(state)
+  return {
+    components: activeComponents(state).length,
+    threats: threats.length,
+    critical: openCriticalThreats(threats),
+    coverage: threatCoverage(state),
+    openIssues: getValidationIssues(state).length,
+    pendingReviews: threats.filter((threat) => threat.reviewStatus === 'in_review').length,
+  }
+}

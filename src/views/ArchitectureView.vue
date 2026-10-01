@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
@@ -11,6 +11,7 @@ import TabList from 'primevue/tablist'
 import TabPanel from 'primevue/tabpanel'
 import TabPanels from 'primevue/tabpanels'
 import Tabs from 'primevue/tabs'
+import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { useToast } from 'primevue/usetoast'
 import DataFlowDiagram from '@/components/DataFlowDiagram.vue'
@@ -24,7 +25,9 @@ import type {
   TrustZone,
 } from '@/models/domain'
 import { createId } from '@/services/repository'
-import { useThreatModelStore } from '@/stores/threatModel'
+import type { CleanupTargetKind, RemovalPlan } from '@/services/lifecycle'
+import { isActive } from '@/services/selectors'
+import { PlanConflictError, useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
 const toast = useToast()
@@ -34,6 +37,8 @@ const boundaryVisible = ref(false)
 const componentVisible = ref(false)
 const flowVisible = ref(false)
 const dependencyVisible = ref(false)
+const cleanupVisible = ref(false)
+const cleanupSubmitting = ref(false)
 
 const boundaryForm = reactive<SystemBoundary>({ ...store.data.boundary })
 const componentForm = reactive<ArchitectureComponent>({
@@ -64,6 +69,98 @@ const dependencyForm = reactive<ExternalDependency>({
   owner: '',
   status: 'active',
 })
+
+// ---- 删前引用核对 ----
+const cleanupTargets = ref<{ kind: CleanupTargetKind; id: string }[]>([])
+const cleanupPlan = ref<RemovalPlan | null>(null)
+const cleanupBatch = ref(false)
+
+const openCleanup = (kind: CleanupTargetKind, id: string): void => {
+  cleanupBatch.value = false
+  cleanupTargets.value = [{ kind, id }]
+  cleanupPlan.value = store.planCleanup(cleanupTargets.value)
+  cleanupVisible.value = true
+}
+
+const selectedComponents = ref<ArchitectureComponent[]>([])
+const selectedFlows = ref<DataFlow[]>([])
+const selectedDependencies = ref<ExternalDependency[]>([])
+
+const openBatchCleanup = (kind: CleanupTargetKind): void => {
+  const ids =
+    kind === 'component'
+      ? selectedComponents.value.map((item) => item.id)
+      : kind === 'flow'
+        ? selectedFlows.value.map((item) => item.id)
+        : selectedDependencies.value.map((item) => item.id)
+  if (ids.length === 0) {
+    toast.add({ severity: 'warn', summary: '未选择条目', detail: '请先勾选需要整理的编号', life: 2500 })
+    return
+  }
+  cleanupBatch.value = true
+  cleanupTargets.value = ids.map((id) => ({ kind, id }))
+  cleanupPlan.value = store.planCleanup(cleanupTargets.value)
+  cleanupVisible.value = true
+}
+
+const confirmCleanup = (): void => {
+  if (!cleanupPlan.value) return
+  cleanupSubmitting.value = true
+  try {
+    if (cleanupBatch.value) {
+      store.startBatchCleanup(
+        cleanupTargets.value[0]?.kind ?? 'component',
+        cleanupTargets.value.map((target) => target.id),
+      )
+      toast.add({
+        severity: 'success',
+        summary: '批量处理已开始',
+        detail: '逐项提交，中断后可在页面顶部恢复未完成项',
+        life: 3000,
+      })
+    } else {
+      store.submitCleanup(cleanupPlan.value)
+      toast.add({ severity: 'success', summary: '清理完成', detail: '图谱、风险汇总与报告已同步更新', life: 3000 })
+    }
+    cleanupVisible.value = false
+    selectedComponents.value = []
+    selectedFlows.value = []
+    selectedDependencies.value = []
+  } catch (error) {
+    if (error instanceof PlanConflictError) {
+      // 引用已被另一窗口改变：重建计划让后一方看到最新引用
+      cleanupPlan.value = store.planCleanup(cleanupTargets.value)
+      toast.add({
+        severity: 'error',
+        summary: '引用关系已变化',
+        detail: '另一窗口已经提交，请核对下方最新结果后重试',
+        life: 4000,
+      })
+    } else {
+      toast.add({
+        severity: 'error',
+        summary: '提交被拒绝',
+        detail: error instanceof Error ? error.message : '未知错误',
+        life: 4000,
+      })
+      cleanupPlan.value = store.planCleanup(cleanupTargets.value)
+    }
+  } finally {
+    cleanupSubmitting.value = false
+  }
+}
+
+const resumeJob = (jobId: string): void => {
+  store.resumeCleanupJob(jobId)
+  toast.add({ severity: 'success', summary: '已恢复处理', detail: '继续提交未完成的编号', life: 2500 })
+}
+
+const dismissJob = (jobId: string): void => {
+  store.dismissCleanupJob(jobId)
+}
+
+const planDeactivateItems = computed(() => cleanupPlan.value?.items.filter((item) => item.mode === 'deactivate') ?? [])
+const planDeleteItems = computed(() => cleanupPlan.value?.items.filter((item) => item.mode === 'delete') ?? [])
 
 const componentTypes = [
   { label: '业务服务', value: 'service' },
@@ -202,6 +299,19 @@ const saveZone = (zone: TrustZone): void => {
       description="维护系统边界、信任区、资产组件、数据流和外部依赖，作为威胁分析的结构化输入。"
     />
 
+    <section v-if="store.interruptedJobs.length > 0" class="resume-banner">
+      <i class="pi pi-history"></i>
+      <div class="resume-copy">
+        <strong>批量清理存在未完成项</strong>
+        <span v-for="job in store.interruptedJobs" :key="job.id" class="resume-row">
+          任务 {{ job.id.slice(-6) }}：{{ job.failedSignatures.length
+          }} 项待恢复（{{ job.lastError }}）
+          <Button label="继续处理" size="small" @click="resumeJob(job.id)" />
+          <Button label="关闭任务" size="small" severity="secondary" text @click="dismissJob(job.id)" />
+        </span>
+      </div>
+    </section>
+
     <section class="boundary-strip">
       <div>
         <span>当前系统</span>
@@ -221,7 +331,12 @@ const saveZone = (zone: TrustZone): void => {
     <section class="panel">
       <div class="panel-header">
         <h2 class="panel-title">数据流图</h2>
-        <span class="muted">{{ store.data.components.length }} 个组件，{{ store.data.flows.length }} 条流</span>
+        <span class="muted">
+          {{ store.data.components.filter((item) => isActive(item.lifecycle)).length }} 个活动组件，{{
+            store.data.flows.filter((item) => isActive(item.lifecycle)).length
+          }}
+          条活动流
+        </span>
       </div>
       <DataFlowDiagram />
     </section>
@@ -238,12 +353,36 @@ const saveZone = (zone: TrustZone): void => {
           <div class="tab-toolbar">
             <div>
               <strong>架构组件</strong>
-              <span>组件必须进入威胁分析范围，或明确记录豁免。</span>
+              <span>组件必须进入威胁分析范围，或明确记录豁免；删除前会先核对引用关系。</span>
             </div>
-            <Button label="新增组件" icon="pi pi-plus" @click="resetComponentForm()" />
+            <div class="toolbar-actions">
+              <Button
+                label="批量清理选中"
+                icon="pi pi-trash"
+                severity="danger"
+                outlined
+                :disabled="selectedComponents.length === 0"
+                @click="openBatchCleanup('component')"
+              />
+              <Button label="新增组件" icon="pi pi-plus" @click="resetComponentForm()" />
+            </div>
           </div>
-          <DataTable :value="store.data.components" dataKey="id" size="small" stripedRows>
-            <Column field="name" header="组件" />
+          <DataTable
+            v-model:selection="selectedComponents"
+            :value="store.data.components"
+            dataKey="id"
+            size="small"
+            stripedRows
+          >
+            <Column selectionMode="multiple" headerStyle="width: 3rem" />
+            <Column header="组件">
+              <template #body="{ data }">
+                <div class="name-cell">
+                  <strong>{{ data.name }}</strong>
+                  <Tag v-if="!isActive(data.lifecycle)" value="已停用" severity="secondary" />
+                </div>
+              </template>
+            </Column>
             <Column header="类型" style="width: 120px">
               <template #body="{ data }">
                 {{ componentTypes.find((item) => item.value === data.type)?.label }}
@@ -258,7 +397,7 @@ const saveZone = (zone: TrustZone): void => {
               </template>
             </Column>
             <Column field="owner" header="负责人" style="width: 150px" />
-            <Column header="操作" style="width: 150px">
+            <Column header="操作" style="width: 180px">
               <template #body="{ data }">
                 <div class="action-stack">
                   <Button
@@ -266,15 +405,17 @@ const saveZone = (zone: TrustZone): void => {
                     label="编辑"
                     size="small"
                     text
+                    :disabled="!isActive(data.lifecycle)"
                     @click="resetComponentForm(data)"
                   />
                   <Button
                     icon="pi pi-trash"
+                    label="清理"
                     size="small"
                     severity="danger"
                     text
-                    aria-label="删除组件"
-                    @click="store.removeEntity('components', data.id)"
+                    :aria-label="`清理组件 ${data.name}`"
+                    @click="openCleanup('component', data.id)"
                   />
                 </div>
               </template>
@@ -311,12 +452,36 @@ const saveZone = (zone: TrustZone): void => {
           <div class="tab-toolbar">
             <div>
               <strong>数据流清单</strong>
-              <span>记录协议、数据级别与是否跨信任区。</span>
+              <span>记录协议、数据级别与是否跨信任区；清理会同时核对端点与关联威胁。</span>
             </div>
-            <Button label="新增数据流" icon="pi pi-plus" @click="resetFlowForm()" />
+            <div class="toolbar-actions">
+              <Button
+                label="批量清理选中"
+                icon="pi pi-trash"
+                severity="danger"
+                outlined
+                :disabled="selectedFlows.length === 0"
+                @click="openBatchCleanup('flow')"
+              />
+              <Button label="新增数据流" icon="pi pi-plus" @click="resetFlowForm()" />
+            </div>
           </div>
-          <DataTable :value="store.data.flows" dataKey="id" size="small" stripedRows>
-            <Column field="name" header="数据流" />
+          <DataTable
+            v-model:selection="selectedFlows"
+            :value="store.data.flows"
+            dataKey="id"
+            size="small"
+            stripedRows
+          >
+            <Column selectionMode="multiple" headerStyle="width: 3rem" />
+            <Column header="数据流">
+              <template #body="{ data }">
+                <div class="name-cell">
+                  <strong>{{ data.name }}</strong>
+                  <Tag v-if="!isActive(data.lifecycle)" value="已停用" severity="secondary" />
+                </div>
+              </template>
+            </Column>
             <Column header="源 → 目标">
               <template #body="{ data }">
                 {{ componentName(data.sourceId) }} → {{ componentName(data.targetId) }}
@@ -329,16 +494,24 @@ const saveZone = (zone: TrustZone): void => {
                 <StatusTag :value="data.crossesTrustBoundary ? 'high' : 'low'" />
               </template>
             </Column>
-            <Column header="操作" style="width: 150px">
+            <Column header="操作" style="width: 180px">
               <template #body="{ data }">
-                <Button icon="pi pi-pencil" label="编辑" size="small" text @click="resetFlowForm(data)" />
+                <Button
+                  icon="pi pi-pencil"
+                  label="编辑"
+                  size="small"
+                  text
+                  :disabled="!isActive(data.lifecycle)"
+                  @click="resetFlowForm(data)"
+                />
                 <Button
                   icon="pi pi-trash"
+                  label="清理"
                   size="small"
                   severity="danger"
                   text
-                  aria-label="删除数据流"
-                  @click="store.removeEntity('flows', data.id)"
+                  aria-label="清理数据流"
+                  @click="openCleanup('flow', data.id)"
                 />
               </template>
             </Column>
@@ -351,10 +524,34 @@ const saveZone = (zone: TrustZone): void => {
               <strong>外部依赖</strong>
               <span>外部服务需登记数据级别、供应商与责任团队。</span>
             </div>
-            <Button label="新增依赖" icon="pi pi-plus" @click="resetDependencyForm()" />
+            <div class="toolbar-actions">
+              <Button
+                label="批量清理选中"
+                icon="pi pi-trash"
+                severity="danger"
+                outlined
+                :disabled="selectedDependencies.length === 0"
+                @click="openBatchCleanup('dependency')"
+              />
+              <Button label="新增依赖" icon="pi pi-plus" @click="resetDependencyForm()" />
+            </div>
           </div>
-          <DataTable :value="store.data.dependencies" dataKey="id" size="small" stripedRows>
-            <Column field="name" header="依赖" />
+          <DataTable
+            v-model:selection="selectedDependencies"
+            :value="store.data.dependencies"
+            dataKey="id"
+            size="small"
+            stripedRows
+          >
+            <Column selectionMode="multiple" headerStyle="width: 3rem" />
+            <Column header="依赖">
+              <template #body="{ data }">
+                <div class="name-cell">
+                  <strong>{{ data.name }}</strong>
+                  <Tag v-if="!isActive(data.lifecycle)" value="已停用" severity="secondary" />
+                </div>
+              </template>
+            </Column>
             <Column field="vendor" header="供应商" />
             <Column field="purpose" header="用途" />
             <Column field="dataClass" header="数据级别" style="width: 110px" />
@@ -364,22 +561,24 @@ const saveZone = (zone: TrustZone): void => {
                 <StatusTag :value="data.status" />
               </template>
             </Column>
-            <Column header="操作" style="width: 150px">
+            <Column header="操作" style="width: 180px">
               <template #body="{ data }">
                 <Button
                   icon="pi pi-pencil"
                   label="编辑"
                   size="small"
                   text
+                  :disabled="!isActive(data.lifecycle)"
                   @click="resetDependencyForm(data)"
                 />
                 <Button
                   icon="pi pi-trash"
+                  label="清理"
                   size="small"
                   severity="danger"
                   text
-                  aria-label="删除依赖"
-                  @click="store.removeEntity('dependencies', data.id)"
+                  aria-label="清理外部依赖"
+                  @click="openCleanup('dependency', data.id)"
                 />
               </template>
             </Column>
@@ -387,6 +586,69 @@ const saveZone = (zone: TrustZone): void => {
         </TabPanel>
       </TabPanels>
     </Tabs>
+
+    <!-- 删前引用核对 -->
+    <Dialog
+      v-model:visible="cleanupVisible"
+      :header="cleanupBatch ? '批量清理前引用核对' : '清理前引用核对'"
+      modal
+      :style="{ width: '760px' }"
+    >
+      <div v-if="cleanupPlan" class="cleanup-plan">
+        <p class="plan-intro">
+          以下引用关系在移除前已全部列出。已被版本冻结或会签使用的对象会
+          <strong>停用并保留历史</strong>，相关会签回到待重审；仅被草稿引用的条目将一并整理。
+        </p>
+
+        <section v-if="planDeleteItems.length" class="plan-section plan-delete">
+          <h4>将彻底移除（仅草稿引用、未冻结） · {{ planDeleteItems.length }}</h4>
+          <ul>
+            <li v-for="item in planDeleteItems" :key="`del-${item.kind}-${item.id}`">
+              <span class="plan-kind">{{ item.cascade ? '级联' : '目标' }}</span>
+              {{ item.label }} <code>{{ item.id }}</code>
+              <small>{{ item.reason }}</small>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="planDeactivateItems.length" class="plan-section plan-deactivate">
+          <h4>将停用保留（版本冻结或会签使用） · {{ planDeactivateItems.length }}</h4>
+          <ul>
+            <li v-for="item in planDeactivateItems" :key="`off-${item.kind}-${item.id}`">
+              <span class="plan-kind">{{ item.cascade ? '级联' : '目标' }}</span>
+              {{ item.label }} <code>{{ item.id }}</code>
+              <small>{{ item.reason }}</small>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="cleanupPlan.threats.length" class="plan-section">
+          <h4>受影响威胁 · {{ cleanupPlan.threats.length }}</h4>
+          <ul>
+            <li v-for="threat in cleanupPlan.threats" :key="`thr-${threat.id}`">
+              <Tag
+                :value="threat.action === 'prune_draft' ? '草稿剪引用' : '回到待重审'"
+                :severity="threat.action === 'prune_draft' ? 'secondary' : 'warn'"
+              />
+              <strong>{{ threat.code }} {{ threat.title }}</strong>
+              <small v-if="threat.removedRefs.length">
+                受影响引用：{{ threat.removedRefs.map((ref) => `${ref.kind} ${ref.label}`).join('；') }}
+              </small>
+            </li>
+          </ul>
+        </section>
+      </div>
+      <template #footer>
+        <Button label="取消" severity="secondary" outlined @click="cleanupVisible = false" />
+        <Button
+          :label="cleanupBatch ? '开始批量处理' : '确认清理'"
+          icon="pi pi-check"
+          severity="danger"
+          :loading="cleanupSubmitting"
+          @click="confirmCleanup"
+        />
+      </template>
+    </Dialog>
 
     <Dialog v-model:visible="boundaryVisible" header="编辑系统边界" modal :style="{ width: '680px' }">
       <div class="editor-form">
@@ -480,7 +742,7 @@ const saveZone = (zone: TrustZone): void => {
           <label>源组件</label>
           <Select
             v-model="flowForm.sourceId"
-            :options="store.data.components"
+            :options="store.data.components.filter((item) => isActive(item.lifecycle))"
             option-label="name"
             option-value="id"
           />
@@ -489,7 +751,7 @@ const saveZone = (zone: TrustZone): void => {
           <label>目标组件</label>
           <Select
             v-model="flowForm.targetId"
-            :options="store.data.components"
+            :options="store.data.components.filter((item) => isActive(item.lifecycle))"
             option-label="name"
             option-value="id"
           />
@@ -560,6 +822,40 @@ const saveZone = (zone: TrustZone): void => {
 </template>
 
 <style scoped>
+.resume-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #f2c78f;
+  border-left: 4px solid #d97706;
+  border-radius: 6px;
+  background: #fffaf0;
+}
+
+.resume-banner > i {
+  margin-top: 2px;
+  color: #b45309;
+}
+
+.resume-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.resume-copy strong {
+  font-size: 13px;
+}
+
+.resume-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #7b5d2c;
+  font-size: 12px;
+}
+
 .boundary-strip {
   display: grid;
   grid-template-columns: 0.8fr 1.2fr 1.2fr auto;
@@ -604,6 +900,91 @@ const saveZone = (zone: TrustZone): void => {
 .tab-toolbar span {
   color: #707b8e;
   font-size: 12px;
+}
+
+.toolbar-actions {
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-stack {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cleanup-plan {
+  display: grid;
+  gap: 14px;
+}
+
+.plan-intro {
+  margin: 0;
+  color: #515e73;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.plan-section {
+  border: 1px solid #e2e6ec;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.plan-section h4 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.plan-delete {
+  border-left: 3px solid #c64b39;
+}
+
+.plan-deactivate {
+  border-left: 3px solid #b0851f;
+}
+
+.plan-section ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.plan-section li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: #2f3a4d;
+}
+
+.plan-section li small {
+  flex-basis: 100%;
+  color: #7b8699;
+}
+
+.plan-kind {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #eef2f7;
+  color: #5d6b82;
+  font-size: 10px;
+}
+
+.plan-section code {
+  color: #8791a3;
+  font-size: 11px;
 }
 
 .zone-grid {

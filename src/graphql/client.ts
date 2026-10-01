@@ -1,6 +1,12 @@
 import { ApolloClient, ApolloLink, InMemoryCache, Observable } from '@apollo/client/core'
 import { loadState } from '@/services/repository'
-import { dashboardMetrics, evidenceIsExpired } from '@/services/selectors'
+import {
+  activeControls,
+  activeEvidence,
+  activeThreats,
+  dashboardMetrics,
+  evidenceIsExpired,
+} from '@/services/selectors'
 
 const resolveOperation = (operationName: string): Record<string, unknown> => {
   const state = loadState()
@@ -11,7 +17,7 @@ const resolveOperation = (operationName: string): Record<string, unknown> => {
 
   if (operationName === 'ThreatIndex') {
     return {
-      threatIndex: state.threats.map((threat) => ({
+      threatIndex: activeThreats(state).map((threat) => ({
         id: threat.id,
         code: threat.code,
         title: threat.title,
@@ -25,17 +31,19 @@ const resolveOperation = (operationName: string): Record<string, unknown> => {
   }
 
   if (operationName === 'ControlHealth') {
+    const controls = activeControls(state)
+    const evidence = activeEvidence(state)
     return {
       controlHealth: {
-        total: state.controls.length,
-        effective: state.controls.filter((control) => control.status === 'effective').length,
-        degraded: state.controls.filter((control) => control.status === 'degraded').length,
-        failed: state.controls.filter((control) => control.status === 'failed').length,
-        missingEvidence: state.controls.filter((control) => {
-          const evidence = control.evidenceIds
-            .map((id) => state.evidence.find((item) => item.id === id))
+        total: controls.length,
+        effective: controls.filter((control) => control.status === 'effective').length,
+        degraded: controls.filter((control) => control.status === 'degraded').length,
+        failed: controls.filter((control) => control.status === 'failed').length,
+        missingEvidence: controls.filter((control) => {
+          const validRecords = control.evidenceIds
+            .map((id) => evidence.find((item) => item.id === id))
             .filter((item) => item?.valid && !evidenceIsExpired(item))
-          return evidence.length === 0
+          return validRecords.length === 0
         }).length,
       },
     }

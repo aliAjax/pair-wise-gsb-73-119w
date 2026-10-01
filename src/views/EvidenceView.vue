@@ -11,7 +11,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { ControlEvidence } from '@/models/domain'
 import { createId } from '@/services/repository'
-import { evidenceIsExpired } from '@/services/selectors'
+import { activeControls, evidenceIsExpired, isActive } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -46,21 +46,23 @@ const form = reactive<ControlEvidence>({
 })
 
 const filteredEvidence = computed(() =>
-  store.data.evidence.filter((evidence) => {
-    const validity = evidenceIsExpired(evidence) ? 'expired' : evidence.valid ? 'valid' : 'invalid'
-    return (
-      (!controlFilter.value || evidence.controlId === controlFilter.value) &&
-      (!validityFilter.value || validity === validityFilter.value)
-    )
-  }),
+  store.data.evidence
+    .filter((item) => isActive(item.lifecycle))
+    .filter((evidence) => {
+      const validity = evidenceIsExpired(evidence) ? 'expired' : evidence.valid ? 'valid' : 'invalid'
+      return (
+        (!controlFilter.value || evidence.controlId === controlFilter.value) &&
+        (!validityFilter.value || validity === validityFilter.value)
+      )
+    }),
 )
 
 const effectiveControls = computed(
   () =>
-    store.data.controls.filter((control) =>
+    activeControls(store.data).filter((control) =>
       control.evidenceIds.some((id) => {
         const evidence = store.data.evidence.find((item) => item.id === id)
-        return evidence?.valid && !evidenceIsExpired(evidence)
+        return evidence && isActive(evidence.lifecycle) && evidence.valid && !evidenceIsExpired(evidence)
       }),
     ).length,
 )
@@ -121,7 +123,7 @@ const saveEvidence = (): void => {
     <div class="evidence-metrics">
       <div>
         <span>控制总数</span>
-        <strong>{{ store.data.controls.length }}</strong>
+        <strong>{{ activeControls(store.data).length }}</strong>
       </div>
       <div>
         <span>具备有效证据</span>
@@ -129,7 +131,9 @@ const saveEvidence = (): void => {
       </div>
       <div>
         <span>过期证据</span>
-        <strong class="danger-text">{{ store.data.evidence.filter(evidenceIsExpired).length }}</strong>
+        <strong class="danger-text">{{
+          store.data.evidence.filter((item) => isActive(item.lifecycle) && evidenceIsExpired(item)).length
+        }}</strong>
       </div>
       <div>
         <span>证据缺口</span>
@@ -143,7 +147,7 @@ const saveEvidence = (): void => {
           <span>关联控制</span>
           <Select
             v-model="controlFilter"
-            :options="store.data.controls"
+            :options="activeControls(store.data)"
             option-label="name"
             option-value="id"
             placeholder="全部控制"
@@ -217,7 +221,7 @@ const saveEvidence = (): void => {
           <label>关联控制</label>
           <Select
             v-model="form.controlId"
-            :options="store.data.controls"
+            :options="activeControls(store.data)"
             option-label="name"
             option-value="id"
           />

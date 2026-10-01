@@ -10,7 +10,7 @@ import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { Risk } from '@/models/domain'
-import { riskLevel, riskScore } from '@/services/selectors'
+import { isActive, riskLevel, riskScore } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -27,8 +27,16 @@ const impacts = [1, 2, 3, 4, 5] as const
 
 const risksAt = (likelihood: number, impact: number): Risk[] =>
   store.data.risks.filter(
-    (risk) => risk.likelihood === likelihood && risk.impact === impact && risk.status !== 'closed',
+    (risk) =>
+      isActive(risk.lifecycle) &&
+      risk.likelihood === likelihood &&
+      risk.impact === impact &&
+      risk.status !== 'closed',
   )
+
+const openRisks = computed(() =>
+  store.data.risks.filter((risk) => isActive(risk.lifecycle) && risk.status !== 'closed'),
+)
 
 const selectedRisk = computed(
   () => store.data.risks.find((risk) => risk.id === selectedRiskId.value) ?? null,
@@ -103,7 +111,7 @@ const submitAcceptance = (): void => {
         <div class="panel-header">
           <h2 class="panel-title">开放风险</h2>
         </div>
-        <DataTable :value="store.data.risks.filter((risk) => risk.status !== 'closed')" size="small" stripedRows>
+        <DataTable :value="openRisks" size="small" stripedRows>
           <Column field="code" header="编号" style="width: 90px" />
           <Column field="title" header="风险" />
           <Column header="评分" style="width: 100px">

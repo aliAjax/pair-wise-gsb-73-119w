@@ -198,6 +198,9 @@ const audit: AuditEvent[] = [
 ]
 
 export const createSeedState = (): ThreatModelState => ({
+  schemaVersion: 2,
+  dataVersion: `dv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+  cleanupJobs: [],
   boundary: {
     id: 'boundary-01',
     name: '客户运营与分析平台',

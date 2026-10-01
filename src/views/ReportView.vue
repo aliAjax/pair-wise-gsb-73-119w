@@ -5,7 +5,7 @@ import Checkbox from 'primevue/checkbox'
 import { useToast } from 'primevue/usetoast'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { riskLevel, riskScore } from '@/services/selectors'
+import { isActive, riskLevel, riskScore } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -20,10 +20,12 @@ const report = computed(() => {
     '',
     '## 控制证据',
     ...(includeEvidence.value
-      ? store.data.evidence.map(
-          (evidence) =>
-            `- ${evidence.title}（${evidence.reference}，${evidence.collectedAt} 至 ${evidence.expiresAt}）`,
-        )
+      ? store.data.evidence
+          .filter((evidence) => isActive(evidence.lifecycle))
+          .map(
+            (evidence) =>
+              `- ${evidence.title}（${evidence.reference}，${evidence.collectedAt} 至 ${evidence.expiresAt}）`,
+          )
       : ['- 未包含']),
     '',
     '## 会签意见',
@@ -43,6 +45,10 @@ const report = computed(() => {
   ]
   return lines.join('\n')
 })
+
+const openRisks = computed(() =>
+  store.data.risks.filter((risk) => isActive(risk.lifecycle) && risk.status !== 'closed'),
+)
 
 const downloadReport = (): void => {
   const blob = new Blob([report.value], { type: 'text/markdown;charset=utf-8' })
@@ -95,11 +101,10 @@ const downloadReport = (): void => {
         <div class="scope-summary">
           <div>
             <span>风险摘要</span>
-            <strong>{{ store.data.risks.filter((risk) => risk.status !== 'closed').length }} 条开放</strong>
+            <strong>{{ openRisks.length }} 条开放</strong>
           </div>
           <div
-            v-for="risk in [...store.data.risks]
-              .filter((item) => item.status !== 'closed')
+            v-for="risk in [...openRisks]
               .sort((a, b) => riskScore(b) - riskScore(a))
               .slice(0, 3)"
             :key="risk.id"

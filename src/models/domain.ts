@@ -4,6 +4,13 @@ export type ThreatStatus = 'open' | 'mitigating' | 'mitigated' | 'accepted'
 export type ControlStatus = 'effective' | 'degraded' | 'failed' | 'planned'
 export type ActorRole = 'development' | 'security' | 'business'
 export type DecisionType = 'accept' | 'degrade' | 'evidence_required' | 'approved' | 'rejected'
+export type LifecycleStatus = 'active' | 'inactive'
+
+export interface LifecycleMeta {
+  status: LifecycleStatus
+  deactivatedAt?: string
+  deactivatedReason?: string
+}
 
 export interface SystemBoundary {
   id: string
@@ -29,6 +36,7 @@ export interface ArchitectureComponent {
   criticality: Severity
   owner: string
   description: string
+  lifecycle?: LifecycleMeta
 }
 
 export interface ExternalDependency {
@@ -39,6 +47,7 @@ export interface ExternalDependency {
   dataClass: 'public' | 'internal' | 'confidential' | 'restricted'
   owner: string
   status: 'active' | 'review_due' | 'retired'
+  lifecycle?: LifecycleMeta
 }
 
 export interface DataFlow {
@@ -50,6 +59,7 @@ export interface DataFlow {
   dataClass: 'public' | 'internal' | 'confidential' | 'restricted'
   crossesTrustBoundary: boolean
   description: string
+  lifecycle?: LifecycleMeta
 }
 
 export interface ControlEvidence {
@@ -62,6 +72,7 @@ export interface ControlEvidence {
   expiresAt: string
   owner: string
   valid: boolean
+  lifecycle?: LifecycleMeta
 }
 
 export interface SecurityControl {
@@ -73,6 +84,7 @@ export interface SecurityControl {
   componentId: string
   description: string
   evidenceIds: string[]
+  lifecycle?: LifecycleMeta
 }
 
 export interface AttackPath {
@@ -82,6 +94,7 @@ export interface AttackPath {
   target: string
   steps: string[]
   likelihood: 1 | 2 | 3 | 4 | 5
+  lifecycle?: LifecycleMeta
 }
 
 export interface Risk {
@@ -94,6 +107,7 @@ export interface Risk {
   owner: string
   acceptanceExpiresAt?: string
   acceptanceCondition?: string
+  lifecycle?: LifecycleMeta
 }
 
 export interface Threat {
@@ -112,6 +126,7 @@ export interface Threat {
   riskIds: string[]
   reviewStatus: ReviewStatus
   revision: number
+  lifecycle?: LifecycleMeta
 }
 
 export interface MitigationTask {
@@ -125,6 +140,7 @@ export interface MitigationTask {
   detail: string
   evidenceIds: string[]
   conflictGroup?: string
+  lifecycle?: LifecycleMeta
 }
 
 export interface ReviewDecision {
@@ -163,7 +179,23 @@ export interface AuditEvent {
   detail: string
 }
 
+export interface CleanupJob {
+  id: string
+  createdAt: string
+  kind: 'component' | 'flow' | 'dependency'
+  targetIds: string[]
+  /** 已经提交完成的清理条目签名 */
+  completedSignatures: string[]
+  status: 'running' | 'interrupted' | 'done'
+  failedSignatures: string[]
+  lastError?: string
+  updatedAt: string
+}
+
 export interface ThreatModelState {
+  schemaVersion: number
+  /** 乐观锁令牌：每次提交后变化，跨窗口提交时用于识别引用已被改变 */
+  dataVersion: string
   boundary: SystemBoundary
   zones: TrustZone[]
   components: ArchitectureComponent[]
@@ -178,12 +210,19 @@ export interface ThreatModelState {
   decisions: ReviewDecision[]
   versions: VersionSnapshot[]
   audit: AuditEvent[]
+  cleanupJobs: CleanupJob[]
   currentRevision: number
 }
 
 export interface ValidationIssue {
   id: string
-  kind: 'uncovered_component' | 'control_failed' | 'risk_acceptance_expired' | 'mitigation_conflict' | 'missing_evidence'
+  kind:
+    | 'uncovered_component'
+    | 'control_failed'
+    | 'risk_acceptance_expired'
+    | 'mitigation_conflict'
+    | 'missing_evidence'
+    | 'stale_reference'
   severity: Severity
   title: string
   detail: string

@@ -13,6 +13,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import type { MitigationTask } from '@/models/domain'
 import { createId } from '@/services/repository'
+import { activeEvidence, activeThreats, isActive } from '@/services/selectors'
 import { useThreatModelStore } from '@/stores/threatModel'
 
 const store = useThreatModelStore()
@@ -48,9 +49,9 @@ const form = reactive<MitigationTask>({
 })
 
 const filteredTasks = computed(() =>
-  statusFilter.value
-    ? store.data.mitigations.filter((task) => task.status === statusFilter.value)
-    : store.data.mitigations,
+  store.data.mitigations
+    .filter((task) => isActive(task.lifecycle))
+    .filter((task) => (statusFilter.value ? task.status === statusFilter.value : true)),
 )
 
 const conflictTaskIds = computed(() => {
@@ -193,7 +194,7 @@ const nextStatus = (status: MitigationTask['status']): MitigationTask['status'] 
           <label>关联威胁</label>
           <Select
             v-model="form.threatId"
-            :options="store.data.threats"
+            :options="activeThreats(store.data)"
             option-label="title"
             option-value="id"
             filter
@@ -240,7 +241,7 @@ const nextStatus = (status: MitigationTask['status']): MitigationTask['status'] 
           <label>关联证据</label>
           <MultiSelect
             v-model="form.evidenceIds"
-            :options="store.data.evidence"
+            :options="activeEvidence(store.data)"
             option-label="title"
             option-value="id"
             display="chip"
